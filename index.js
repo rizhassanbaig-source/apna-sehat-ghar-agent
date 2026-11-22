@@ -19,9 +19,8 @@ module.exports = async (req, res) => {
         const from = msg.from;
         const text = msg.text.body;
 
-        const gemRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
-          method: 'POST',
-          let reply = "";
+        const prompt = `Tum Apna Sehat Ghar ke agent ho. User ne kaha: ${text}. Mukhtasar aur pyar se Urdu me jawab do.`;
+let reply = "";
 for (let i = 0; i < 3; i++) {
   const gemRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`, {
     method: "POST",
