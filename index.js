@@ -22,6 +22,7 @@ module.exports = async (req, res) => {
         const prompt = `Tum Apna Sehat Ghar ke agent ho. User ne kaha: ${text}. Mukhtasar aur pyar se Urdu me jawab do.`;
 const models = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite"];
 let reply = "";
+        let lastError = "";
 for (const model of models) {
   const gemRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
     method: "POST",
@@ -29,7 +30,7 @@ for (const model of models) {
     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
   });
   const gemData = await gemRes.json();
-  let lastError = gemData;
+  lastError = gemData;
   reply = gemData?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (reply) break;
 }
