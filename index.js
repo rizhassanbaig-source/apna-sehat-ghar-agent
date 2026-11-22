@@ -19,13 +19,13 @@ module.exports = async (req, res) => {
         const from = msg.from;
         const text = msg.text.body;
 
-        const gemRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        const gemRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.8-flash:generateContent?key=${GEMINI_API_KEY}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ contents: [{ parts: [{ text: "Tum Apna Sehat Ghar ke AI agent ho. Urdu/Hindi/English me jawab do. " + text }] }] })
         });
         const gemData = await gemRes.json();
-        const reply = gemData?.candidates?.[0]?.content?.parts?.[0]?.text || "GEMINI ERROR: " + JSON.stringify(gemData).slice(0, 300);
+        const reply = gemData?.candidates?.[0]?.content?.parts?.[0]?.text || "Maaf kijiye, samajh nahi aaya.";
 
         await fetch(`https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`, {
           method: 'POST',
