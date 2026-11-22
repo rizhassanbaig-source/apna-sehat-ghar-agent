@@ -46,6 +46,8 @@ module.exports = async (req, res) => {
             reply = "Fees 1000 Rs hai.\n\nAppointment book karni hai? To 'Appointment' likhein.";
             user.step = 'menu';
           } else {
+            } else if (low.includes('hi') || low.includes('hello') || low.includes('salam') || low.includes('aoa')) {
+  reply = "Walaikum Assalam! Kaisay hain aap? \n\nBatayein kya karna hai?\n1. Appointment Book Karni Hai\n2. Timing Pochni Hai\n3. Fees Maloom Karni Hai";
             reply = "Samajh nahi aya. Please likhein:\n1. Appointment\n2. Timing\n3. Fees";
           }
         }
