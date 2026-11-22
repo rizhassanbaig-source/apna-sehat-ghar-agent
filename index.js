@@ -34,7 +34,7 @@ for (const model of models) {
   reply = gemData?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (reply) break;
 }
-if (!reply) reply = "ASLI ERROR: " + JSON.stringify(lastError).slice(0, 400);
+if (!reply) reply = "Model busy hai, thori der baad try karein.";
         await fetch(`https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
