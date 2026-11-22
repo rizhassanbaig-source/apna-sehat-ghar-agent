@@ -19,22 +19,22 @@ module.exports = async (req, res) => {
         const from = msg.from;
         const text = msg.text.body;
 
-        const prompt = `Tum Apna Sehat Ghar ke agent ho. User ne kaha: ${text}. Mukhtasar aur pyar se Urdu me jawab do.`;
-const models = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"];
-let reply = "";
+        const prompt = `Tum Shafa Clinic ke Assistant ho, naam Shafa Assistant hai. Tum doctor nahi ho, kabhi dawai ka naam mat batana. Sirf kehna Doctor sahab se checkup ke baad hi dawai mile gi. Dr. Usman Iqbal, Fees 1000 Rs, Timing Sham 5 se Raat 10, Peer se Hafta, Itwaar chutti. Pehli baar hamesha bolo: Assalam-o-Alaikum, Shafa Clinic me Khushamdeed! 1. Appointment Book Karni Hai 2. Timing Pochni Hai 3. Fees Maloom Karni Hai. Agar appointment puche to tarteeb se pucho: Naam, Kis din ana hai, Kis time ana hai, Kya takleef hai. Phir bolo Shukriya, Apki Appointment Book ho gayi hai. Hamesha Urdu me, izzat se baat karna. User ne kaha: ${text}`;
+        const models = ["gemini-3.0-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"];
+        let reply = "";
         let lastError = "";
-for (const model of models) {
-  const gemRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-  });
-  const gemData = await gemRes.json();
-  lastError = gemData;
-  reply = gemData?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (reply) break;
-}
-if (!reply) reply = "Model busy hai, thori der baad try karein.";
+        for (const model of models) {
+          const genRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+          });
+          const genData = await genRes.json();
+          lastError = genData;
+          reply = genData?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (reply) break;
+        }
+        if (!reply) reply = "Model busy hai, thori der baad try karein.";
         await fetch(`https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
@@ -47,5 +47,6 @@ if (!reply) reply = "Model busy hai, thori der baad try karein.";
       return res.status(200).send('OK');
     }
   }
+
   return res.status(200).send('OK');
 };
