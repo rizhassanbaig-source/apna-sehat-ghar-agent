@@ -19,7 +19,7 @@ module.exports = async (req, res) => {
         const from = msg.from;
         const text = msg.text.body;
 
-        const gemRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.8-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        const gemRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ contents: [{ parts: [{ text: "Tum Apna Sehat Ghar ke AI agent ho. Urdu/Hindi/English me jawab do. " + text }] }] })
