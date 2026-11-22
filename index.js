@@ -20,7 +20,6 @@ module.exports = async (req, res) => {
         const text = msg.text.body;
 
         const prompt = `Tum Apna Sehat Ghar ke agent ho. User ne kaha: ${text}. Mukhtasar aur pyar se Urdu me jawab do.`;
-let reply = "";
 const models = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite"];
 let reply = "";
 for (const model of models) {
