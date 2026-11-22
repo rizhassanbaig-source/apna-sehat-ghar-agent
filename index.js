@@ -25,8 +25,7 @@ module.exports = async (req, res) => {
           body: JSON.stringify({ contents: [{ parts: [{ text: "Tum Apna Sehat Ghar ke AI agent ho. Urdu/Hindi/English me jawab do. " + text }] }] })
         });
         const gemData = await gemRes.json();
-        const reply = gemData?.candidates?.[0]?.content?.parts?.[0]?.text || "Maaf kijiye, samajh nahi aaya.";
-
+        const reply = gemData?.candidates?.[0]?.content?.parts?.[0]?.text || "GEMINI ERROR: " + JSON.stringify(gemData).slice(0, 300);
         await fetch(`https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
