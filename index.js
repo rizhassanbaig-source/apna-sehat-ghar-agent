@@ -21,8 +21,10 @@ module.exports = async (req, res) => {
 
         const prompt = `Tum Apna Sehat Ghar ke agent ho. User ne kaha: ${text}. Mukhtasar aur pyar se Urdu me jawab do.`;
 let reply = "";
-for (let i = 0; i < 3; i++) {
-  const gemRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`, {
+const models = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite"];
+let reply = "";
+for (const model of models) {
+  const gemRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
@@ -30,7 +32,6 @@ for (let i = 0; i < 3; i++) {
   const gemData = await gemRes.json();
   reply = gemData?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (reply) break;
-  await new Promise(r => setTimeout(r, 2000));
 }
 if (!reply) reply = "GEMINI ERROR: Model busy hai, 1 min baad phir Hi bhejen";
         await fetch(`https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`, {
