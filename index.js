@@ -2,7 +2,6 @@ const VERIFY_TOKEN = "clinic123";
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-// Doctor - Dr. Usman Iqbal
 const DOCTOR_NUMBER = "923364776344";
 
 const users = {};
@@ -10,14 +9,44 @@ const users = {};
 // --- GOOGLE FORM / SHEET WALA HISSA ---
 const FORM_ID = "1FAIpQLScIb7q0BfmGFk-cSLmqFYUi4RTVOosxgiltDrvJ-66DPLq9bQ";
 
-function convertDayToDate(dayText) {
-  const low = dayText.toLowerCase().trim();
+function convertDateInputToDate(dateText) {
+  const low = dateText.toLowerCase().trim();
   const today = new Date();
+  // Aaj / Kal
   if (low.includes("aaj")) return today.toISOString().split('T')[0];
   if (low.includes("kal")) {
     const t = new Date(); t.setDate(t.getDate() + 1);
     return t.toISOString().split('T')[0];
   }
+  // Agar 25/11 / 25-11-2026 / 25/11/2026 likha ho
+  const numMatch = low.match(/(\d{1,2})[\/\-\.](\d{1,2})(?:[\/\-\.](\d{2,4}))?/);
+  if (numMatch) {
+    let d = parseInt(numMatch[1]);
+    let m = parseInt(numMatch[2]) - 1;
+    let y = numMatch[3] ? parseInt(numMatch[3]) : today.getFullYear();
+    if (y < 100) y += 2000;
+    const dt = new Date(y, m, d);
+    return dt.toISOString().split('T')[0];
+  }
+  // Agar 25 November / 25 Nov / 25 Novamber likha ho
+  const months = { "jan": 0, "january": 0, "feb": 1, "february": 1, "mar": 2, "march": 2, "apr": 3, "april": 3, "may": 4, "jun": 5, "june": 5, "jul": 6, "july": 6, "aug": 7, "august": 7, "sep": 8, "september": 8, "oct": 9, "october": 9, "nov": 10, "november": 10, "dec": 11, "december": 11 };
+  for (let key in months) {
+    if (low.includes(key)) {
+      const dayNum = parseInt(low.replace(/[^0-9]/g, '')) || today.getDate();
+      const dt = new Date(today.getFullYear(), months[key], dayNum);
+      // Agar wo date guzar gayi ho to agle saal ki le lo
+      if (dt < today) dt.setFullYear(dt.getFullYear() + 1);
+      return dt.toISOString().split('T')[0];
+    }
+  }
+  // Agar sirf 25 likha ho (sirf tareekh)
+  const onlyDay = parseInt(low.replace(/[^0-9]/g, ''));
+  if (onlyDay >= 1 && onlyDay <= 31) {
+    const dt = new Date(today.getFullYear(), today.getMonth(), onlyDay);
+    if (dt < today) dt.setMonth(dt.getMonth() + 1);
+    return dt.toISOString().split('T')[0];
+  }
+  // Agar phir bhi Peer / Mangal likh de to usko bhi date bana do
   const days = { "itwaar": 0, "sunday": 0, "peer": 1, "monday": 1, "mangal": 2, "tuesday": 2, "budh": 3, "wednesday": 3, "jumerat": 4, "thursday": 4, "juma": 5, "friday": 5, "hafta": 6, "saturday": 6 };
   for (let key in days) {
     if (low.includes(key)) {
@@ -48,7 +77,7 @@ async function saveToSheet(user, from) {
   try {
     const formUrl = `https://docs.google.com/forms/d/e/${FORM_ID}/formResponse`;
     const params = new URLSearchParams();
-    params.append("entry.1811277503", convertDayToDate(user.day));
+    params.append("entry.1811277503", convertDateInputToDate(user.day));
     params.append("entry.1364007535", convertTimeToFormTime(user.time));
     params.append("entry.2046298723", user.name);
     params.append("entry.1419912836", from);
@@ -62,9 +91,7 @@ async function saveToSheet(user, from) {
     });
   } catch (e) { console.log("Sheet Error:", e); }
 }
-// --- KHATAM ---
 
-// --- FIXED: Ab poora lafz check hoga, andar wala hissa nahi ---
 function hasWord(low, words) {
   const allWords = low.split(/[\s,!.?]+/);
   return words.some(w => allWords.includes(w));
@@ -116,16 +143,14 @@ module.exports = async (req, res) => {
       let reply = "";
       let doctorMsg = "";
 
-      // --- FIXED: Pehle Step wale jawab, phir baaki cheezein ---
-      // Agar user Naam / Din / Time / Takleef bata raha hai, to usko pehle lo
-
       if (isCancel(low) && user.step !== "start") {
         user.step = "menu";
         reply = "Theek hai, cancel kar diya. 👍\n\nDobara chahiye to batayein:\n1. Appointment Book Karni Hai\n2. Timing Pochni Hai\n3. Fees Maloom Karni Hai";
       }
       else if (user.step === "ask_name") {
         user.name = text;
-        reply = "Shukriya " + user.name + "! ❤️\nKis din ana hai? (Jese: Peer, Mangal, Budh, Kal, Aaj)";
+        // --- AB DATE PUCHEGA, DIN NAHI ---
+        reply = "Shukriya " + user.name + "! ❤️\nKis Date ko ana hai? (Jese: 25 November, 26 November, Kal, Aaj)";
         user.step = "ask_day";
       }
       else if (user.step === "ask_day") {
@@ -140,9 +165,9 @@ module.exports = async (req, res) => {
       }
       else if (user.step === "ask_problem") {
         user.problem = text;
-        reply = "✅ Appointment Book Ho Gayi!\n\n👤 Naam: " + user.name + "\n📅 Din: " + user.day + "\n⏰ Time: " + user.time + "\n🤒 Takleef: " + user.problem + "\n👨‍⚕️ Doctor: Dr. Usman Iqbal\n💰 Fees: 500 Rs\n\nShukriya! Allah Shifa de. 🤲\n\nKuch aur poochna hai to 'Hi' likhein.";
+        reply = "✅ Appointment Book Ho Gayi!\n\n👤 Naam: " + user.name + "\n📅 Date: " + user.day + "\n⏰ Time: " + user.time + "\n🤒 Takleef: " + user.problem + "\n👨‍⚕️ Doctor: Dr. Usman Iqbal\n💰 Fees: 500 Rs\n\nShukriya! Allah Shifa de. 🤲\n\nKuch aur poochna hai to 'Hi' likhein.";
         
-        doctorMsg = "🔔 NAYI APPOINTMENT! 🔔\n\n👤 Patient: " + user.name + "\n📱 Number: " + from + "\n📅 Din: " + user.day + "\n⏰ Time: " + user.time + "\n🤒 Takleef: " + user.problem + "\n👨‍⚕️ Doctor: Dr. Usman Iqbal\n\nPlease time pe ready rahein.";
+        doctorMsg = "🔔 NAYI APPOINTMENT! 🔔\n\n👤 Patient: " + user.name + "\n📱 Number: " + from + "\n📅 Date: " + user.day + "\n⏰ Time: " + user.time + "\n🤒 Takleef: " + user.problem + "\n👨‍⚕️ Doctor: Dr. Usman Iqbal\n\nPlease time pe ready rahein.";
 
         await saveToSheet(user, from);
         
