@@ -7,6 +7,67 @@ const DOCTOR_NUMBER = "923364776344";
 
 const users = {};
 
+// --- GOOGLE FORM / SHEET WALA HISSA ---
+const FORM_ID = "1FAIpQLScIb7q0BfmGFk-cSLmqFYUi4RTVOosxgiltDrvJ-66DPLq9bQ";
+
+function convertDayToDate(dayText) {
+  const low = dayText.toLowerCase().trim();
+  const today = new Date();
+  // Aaj / Kal
+  if (low.includes("aaj")) return today.toISOString().split('T')[0];
+  if (low.includes("kal")) {
+    const t = new Date(); t.setDate(t.getDate() + 1);
+    return t.toISOString().split('T')[0];
+  }
+  // Din ke naam -> Agla wala din
+  const days = { "itwaar": 0, "sunday": 0, "peer": 1, "monday": 1, "mangal": 2, "tuesday": 2, "budh": 3, "wednesday": 3, "jumerat": 4, "thursday": 4, "juma": 5, "friday": 5, "hafta": 6, "saturday": 6 };
+  for (let key in days) {
+    if (low.includes(key)) {
+      const target = days[key];
+      const d = new Date();
+      let diff = (target - d.getDay() + 7) % 7;
+      if (diff === 0) diff = 7; // Agar aaj hi wo din hai to agle haftay wala
+      d.setDate(d.getDate() + diff);
+      return d.toISOString().split('T')[0];
+    }
+  }
+  return today.toISOString().split('T')[0]; // Agar samajh na aaye to aaj ki date
+}
+
+function convertTimeToFormTime(timeText) {
+  const low = timeText.toLowerCase().trim();
+  // Agar pehle se 17:00 jaisa hai to waisa hi
+  if (low.includes(":")) return low.split(" ")[0];
+  let num = parseInt(low.replace(/[^0-9]/g, '')) || 5;
+  let hour = num;
+  // Sham / Raat ho to +12
+  if (low.includes("sham") || low.includes("raat") || low.includes("pm") || (num >= 1 && num <= 9)) {
+    if (num < 12) hour = num + 12;
+  }
+  if (hour === 24) hour = 12;
+  return String(hour).padStart(2, '0') + ":00";
+}
+
+async function saveToSheet(user, from) {
+  try {
+    const formUrl = `https://docs.google.com/forms/d/e/${FORM_ID}/formResponse`;
+    const params = new URLSearchParams();
+    params.append("entry.1811277503", convertDayToDate(user.day));
+    params.append("entry.1364007535", convertTimeToFormTime(user.time));
+    params.append("entry.2046298723", user.name);
+    params.append("entry.1419912836", from);
+    params.append("entry.913984501", user.problem);
+    params.append("entry.829447129", "Dr. Usman Iqbal");
+    await fetch(formUrl, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: params.toString()
+    });
+  } catch (e) { console.log("Sheet Error:", e); }
+}
+// --- KHATAM ---
+
 function isGreeting(low) {
   return low.includes("hi") || low.includes("hello") || low.includes("salam") || low.includes("aoa") || low.includes("assalam") || low.includes("hey");
 }
@@ -125,6 +186,9 @@ module.exports = async (req, res) => {
         reply = "✅ Appointment Book Ho Gayi!\n\n👤 Naam: " + user.name + "\n📅 Din: " + user.day + "\n⏰ Time: " + user.time + "\n🤒 Takleef: " + user.problem + "\n👨‍⚕️ Doctor: Dr. Usman Iqbal\n💰 Fees: 500 Rs\n\nShukriya! Allah Shifa de. 🤲\n\nKuch aur poochna hai to 'Hi' likhein.";
         
         doctorMsg = "🔔 NAYI APPOINTMENT! 🔔\n\n👤 Patient: " + user.name + "\n📱 Number: " + from + "\n📅 Din: " + user.day + "\n⏰ Time: " + user.time + "\n🤒 Takleef: " + user.problem + "\n👨‍⚕️ Doctor: Dr. Usman Iqbal\n\nPlease time pe ready rahein.";
+
+        // SHEET ME SAVE KARO - Pehle save, phir clear
+        await saveToSheet(user, from);
         
         user.step = "menu";
         user.day = ""; user.time = ""; user.problem = "";
