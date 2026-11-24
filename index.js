@@ -120,6 +120,18 @@ module.exports = async (req, res) => {
       }
       else if (user.step === "ask_day") {
         user.day = text;
+              else if (user.step === "ask_day") {
+        // AGENT: Ghalat Date pakro - 32 November jesi
+        let testDate = convertDateInputToDate(text);
+        let dNum = parseInt(text.replace(/[^0-9]/g, ''));
+        if (dNum > 31 || (text.toLowerCase().includes("nov") && dNum > 30)) {
+          reply = "Arre! 😅 " + text + " to hota hi nahi!\nNovember me sirf 30 din hote hain.\nDobara sahi Date batayein? (Jese: 25 November, 29 November)";
+          // step wahi rahega, dobara date puchega
+        } else {
+          user.day = text;
+          reply = "Theek hai, " + user.day + " ko kis time ana hai? (Jese: 5 baje, 7 baje, Sham ko)";
+          user.step = "ask_time";
+        }
         reply = "Theek hai, " + user.day + " ko kis time ana hai? (Jese: 5 baje, 7 baje, Sham ko)";
         user.step = "ask_time";
       }
