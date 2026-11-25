@@ -181,7 +181,7 @@ Rules:
       return { data: null, error: "GEMINI_API_KEY missing in env" };
     }
 
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -242,7 +242,8 @@ module.exports = async (req, res) => {
       let ai = aiResult?.data;
 
       if (!ai) {
-        await sendWhatsApp(from, "Debug Error: " + (aiResult?.error || "Unknown Gemini Error"));
+        console.error("AI Fallback Triggered:", aiResult?.error);
+        await sendWhatsApp(from, "Assalam-o-Alaikum! Main Clinic Assistant hon. 😊\n\nKya madad karun? Appointment book karni hai, Timing ya Fees poochni hai?\n\nBas apni baat likh dein, jese: 'Mujhe kal sham ko Dr Usman se milna hai'");
         return res.status(200).send("OK");
       }
 
