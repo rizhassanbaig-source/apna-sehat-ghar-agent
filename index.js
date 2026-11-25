@@ -36,63 +36,121 @@ function findDoctor(text) {
   return null;
 }
 
-function convertDateInputToDate(dateText) {
-  const low = (dateText || "").toLowerCase().trim();
-  const today = new Date();
-  if (low.includes("aaj")) return today.toISOString().split('T')[0];
-  if (low.includes("kal")) {
-    const t = new Date();
-    t.setDate(t.getDate() + 1);
-    return t.toISOString().split('T')[0];
-  }
-  const numMatch = low.match(/(\d{1,2})[\/\-\.](\d{1,2})(?:[\/\-\.](\d{2,4}))?/);
-  if (numMatch) {
-    let d = parseInt(numMatch[1]);
-    let m = parseInt(numMatch[2]) - 1;
-    let y = numMatch[3] ? parseInt(numMatch[3]) : today.getFullYear();
-    if (y < 100) y += 2000;
-    const dt = new Date(y, m, d);
-    return dt.toISOString().split('T')[0];
-  }
-  const months = { "jan": 0, "january": 0, "feb": 1, "february": 1, "mar": 2, "march": 2, "apr": 3, "april": 3, "may": 4, "jun": 5, "june": 5, "jul": 6, "july": 6, "aug": 7, "august": 7, "sep": 8, "september": 8, "oct": 9, "october": 9, "nov": 10, "november": 10, "dec": 11, "december": 11 };
-  for (let key in months) {
-    if (low.includes(key)) {
-      const dayNum = parseInt(low.replace(/[^0-9]/g, '')) || today.getDate();
-      const dt = new Date(today.getFullYear(), months[key], dayNum);
-      if (dt < today) dt.setFullYear(dt.getFullYear() + 1);
-      return dt.toISOString().split('T')[0];
+function extractNameSmart(text) {
+  const clean = (text || "").trim();
+  const low = clean.toLowerCase();
+
+  // Agar sawal lag raha ho ya bohot lamba jumla ho
+  if (low.includes("kiya ") || low.includes("kya ") || low.includes("?") || clean.split(/\s+/).length > 5) {
+    const match = clean.match(/(?:mera\s+naam|naam|name)\s+(?:hai\s+)?([a-zA-Z\u0600-\u06FF]+(?:\s+[a-zA-Z\u0600-\u06FF]+)?)/i);
+    if (match && match[1]) {
+      const candidate = match[1].trim();
+      const badWords = ["ali hai", "kya", "kiya", "appointment", "book", "doctor"];
+      if (!badWords.includes(candidate.toLowerCase())) return candidate;
     }
+    return null;
   }
-  const onlyDay = parseInt(low.replace(/[^0-9]/g, ''));
-  if (onlyDay >= 1 && onlyDay <= 31) {
-    const dt = new Date(today.getFullYear(), today.getMonth(), onlyDay);
-    if (dt < today) dt.setMonth(dt.getMonth() + 1);
-    return dt.toISOString().split('T')[0];
+
+  const match = clean.match(/(?:mera\s+naam|naam|name)\s+(?:hai\s+)?(.+)/i);
+  if (match && match[1]) return match[1].trim();
+
+  if (/^[a-zA-Z\u0600-\u06FF\s]{2,35}$/.test(clean) && !/\d/.test(clean)) {
+    return clean;
   }
+  return null;
+}
+
+function validateAndFormatDate(dateText) {
+  const raw = (dateText || "").trim();
+  const low = raw.toLowerCase();
+  const today = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Karachi" }));
+
+  if (low.includes("aaj") || low.includes("today")) {
+    return { valid: true, formatted: "Aaj", iso: today.toISOString().split('T')[0] };
+  }
+  if (low.includes("kal") || low.includes("tomorrow")) {
+    const t = new Date(today);
+    t.setDate(t.getDate() + 1);
+    return { valid: true, formatted: "Kal", iso: t.toISOString().split('T')[0] };
+  }
+
+  // Check explicit day number like "32 date ko", "31", "28 ko"
+  const dayMatch = low.match(/\b(\d{1,2})\b/);
+  if (dayMatch) {
+    const dayNum = parseInt(dayMatch[1], 10);
+    if (dayNum < 1 || dayNum > 31) {
+      return { valid: false, reason: `${dayNum} koi valid date nahi hoti. Mehine ki date 1 se 30/31 ke darmiyan hoti hai.` };
+    }
+    // November has 30 days
+    if (today.getMonth() === 10 && !low.includes("dec") && !low.includes("jan") && dayNum > 30) {
+      return { valid: false, reason: `November me sirf 30 din hote hain, ${dayNum} November nahi hoti.` };
+    }
+    const dt = new Date(today.getFullYear(), today.getMonth(), dayNum);
+    if (dt < new Date(today.getFullYear(), today.getMonth(), today.getDate())) {
+      dt.setMonth(dt.getMonth() + 1);
+    }
+    return { valid: true, formatted: raw, iso: dt.toISOString().split('T')[0] };
+  }
+
   const days = { "itwaar": 0, "sunday": 0, "peer": 1, "monday": 1, "mangal": 2, "tuesday": 2, "budh": 3, "wednesday": 3, "jumerat": 4, "thursday": 4, "juma": 5, "friday": 5, "hafta": 6, "saturday": 6 };
   for (let key in days) {
     if (low.includes(key)) {
       const target = days[key];
-      const d = new Date();
+      const d = new Date(today);
       let diff = (target - d.getDay() + 7) % 7;
       if (diff === 0) diff = 7;
       d.setDate(d.getDate() + diff);
-      return d.toISOString().split('T')[0];
+      return { valid: true, formatted: raw, iso: d.toISOString().split('T')[0] };
     }
   }
-  return today.toISOString().split('T')[0];
+
+  return { valid: false, reason: "Barah-e-karam clear date batayein, jese: Aaj, Kal, 26, ya 28 November." };
+}
+
+function validateAndFormatTime(timeText) {
+  const raw = (timeText || "").trim();
+  const low = raw.toLowerCase();
+
+  const numMatch = low.match(/\b(\d{1,2})(?::(\d{2}))?\b/);
+  if (!numMatch) {
+    return { valid: false, reason: "Time clear nahi hai. Meherbani kar ke time batayein, jese: 6 baje, shaam 7 baje, ya subah 11 baje." };
+  }
+
+  let hour = parseInt(numMatch[1], 10);
+  const mins = numMatch[2] ? parseInt(numMatch[2], 10) : 0;
+
+  if (hour === 0 || hour > 24 || mins > 59) {
+    return { valid: false, reason: `"${raw}" valid time nahi hai. Barah-e-karam 1 se 12 ke darmiyan time batayein (jese: 6 baje ya 7 baje).` };
+  }
+
+  // Agar user "13 bajey" likhe to samjhayein
+  if (hour > 12 && !low.includes(":")) {
+    return { valid: false, reason: `Ghari me 13 bajey nahi hote 😊. Agar dopahar/shaam ka 1 bajta hai to "1 baje dopahar" likhein, warna apna pasandida time (jese 6 baje) batayein.` };
+  }
+
+  let finalHour = hour;
+  if (low.includes("sham") || low.includes("shaam") || low.includes("raat") || low.includes("pm")) {
+    if (hour < 12) finalHour = hour + 12;
+  } else if (!low.includes("subah") && !low.includes("am") && !low.includes("dopahar") && hour >= 1 && hour <= 9) {
+    finalHour = hour + 12;
+  }
+
+  if (finalHour === 24) finalHour = 12;
+  const formTime = String(finalHour).padStart(2, '0') + ":" + String(mins).padStart(2, '0');
+
+  return { valid: true, formatted: raw, formTime };
+}
+
+function convertDateInputToDate(dateText) {
+  const res = validateAndFormatDate(dateText);
+  if (res.valid) return res.iso;
+  return new Date().toISOString().split('T')[0];
 }
 
 function convertTimeToFormTime(timeText) {
-  const low = (timeText || "").toLowerCase().trim();
-  if (low.includes(":")) return low.split(" ")[0];
-  let num = parseInt(low.replace(/[^0-9]/g, '')) || 5;
-  let hour = num;
-  if (low.includes("sham") || low.includes("shaam") || low.includes("raat") || low.includes("pm") || (num >= 1 && num <= 9)) {
-    if (num < 12) hour = num + 12;
-  }
-  if (hour === 24) hour = 12;
-  return String(hour).padStart(2, '0') + ":00";
+  const res = validateAndFormatTime(timeText);
+  if (res.valid) return res.formTime;
+  return "17:00";
 }
 
 async function saveToSheet(user, from, isCancel = false) {
@@ -155,10 +213,10 @@ DOCTORS KI LIST:
 ${doctorsInfo}
 
 TUMHARI ZIMMEDARIYAN:
-1. User ke message ko samjho: kya wo appointment book karna chahta hai, timing/fees/doctors/address pooch raha hai, ya appointment cancel karna chahta hai?
+1. User ke message ko samjho: kya wo appointment book karna chahta hai, timing/fees/doctors/address/rule pooch raha hai, ya appointment cancel karna chahta hai?
 2. Appointment book karne ke liye ye 5 maloomat zaroori hain: doctor, name, day, time, problem.
-3. Agar user ek hi message me 2, 3 ya saari cheezein bata de to saari maloomat ek hi baar me nikal lo aur jo cheez reh gayi ho sirf wahi pyar se poocho.
-4. Agar saari 5 maloomat mil jayein to "action" ko "book" kar do.
+3. Agar user ghalat tareekh (jese 32 Nov) ya ghalat waqt (jese 13 bajey) ya doctor ki timing ke bahar ka waqt bataye to pyar se durust tareekh/waqt poochho.
+4. Agar user saari 5 maloomat de de to "action" ko "book" kar do.
 5. Agar user cancel karne ko kahe to "action" ko "cancel" kar do.
 
 PICHLI GUFTAGU:
@@ -184,7 +242,7 @@ Sirf JSON format me jawab do:
   "action": "none | book | cancel"
 }`;
 
-  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
+  const models = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
 
   for (const model of models) {
     try {
@@ -213,59 +271,69 @@ Sirf JSON format me jawab do:
   return null;
 }
 
-// ============ INSTANT BACKUP FLOW (JAB AI BUSY HO) ============
+// ============ SMART BACKUP FLOW ============
 function handleInstantBackup(user, text) {
   const low = text.toLowerCase().trim();
   const matchedDoc = findDoctor(text);
   if (matchedDoc) user.doctor = matchedDoc;
 
-  if (!user.step) user.step = "menu";
+  if (!user.step) user.step = "ask_name";
 
-  if (low.includes("cancel")) {
+  if (low === "cancel" || low.includes("cancel appointment")) {
+    user.step = "ask_name";
     return { type: "cancel", reply: "Theek hai, aapki Appointment *CANCELLED* kar di hai. ❌\nDobara zaroorat ho to bata dein. 😊" };
   }
 
+  if (low === "reset" || low === "menu") {
+    user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null; user.step = "ask_name";
+    return {
+      type: "none",
+      reply: `Assalam-o-Alaikum! Main Clinic Assistant hoon. 😊\n\n${doctorsListText()}\nAppointment book karne ke liye pehle apna naam bata dein?`
+    };
+  }
+
   if (user.step === "ask_name") {
-    user.name = text;
+    const parsedName = extractNameSmart(text);
+    if (!parsedName) {
+      return {
+        type: "none",
+        reply: "Meherbani kar ke apna sirf naam bata dein (jese: Ali Ahmed), taake main aapki appointment aage barha sakoon. 😊"
+      };
+    }
+    user.name = parsedName;
     user.step = "ask_day";
-    return { type: "none", reply: `Shukriya ${user.name}! 😊 Kis date ko aana hai? (Jese: Aaj, Kal, 26 November)` };
+    return { type: "none", reply: `Shukriya ${user.name}! 😊 Kis date ko aana hai? (Jese: Aaj, Kal, 26, ya 28 November)` };
   }
 
   if (user.step === "ask_day") {
-    user.day = text;
+    const dateCheck = validateAndFormatDate(text);
+    if (!dateCheck.valid) {
+      return { type: "none", reply: `${dateCheck.reason} 😊` };
+    }
+    user.day = dateCheck.formatted;
     user.step = "ask_time";
-    return { type: "none", reply: `Theek hai, ${user.day} ko kis time aana chahein ge? (Jese: 6 baje, Sham ko)` };
+    return { type: "none", reply: `Theek hai, ${user.day} ko kis time aana chahein ge? (Jese: 6 baje, 7 baje shaam)` };
   }
 
   if (user.step === "ask_time") {
-    user.time = text;
+    const timeCheck = validateAndFormatTime(text);
+    if (!timeCheck.valid) {
+      return { type: "none", reply: `${timeCheck.reason}` };
+    }
+    user.time = timeCheck.formatted;
     user.step = "ask_problem";
     return { type: "none", reply: "Aakhri baat: kya takleef ya checkup karwana hai? (Jese: Bukhar, Pait dard)" };
   }
 
   if (user.step === "ask_problem") {
     user.problem = text;
-    user.step = "menu";
+    user.step = "ask_name";
     return { type: "book", reply: "" };
   }
 
-  if (low.includes("fee") || low.includes("fees") || low.includes("paisa") || low.includes("charges")) {
-    return { type: "none", reply: "Clinic ki Fees:\n• Dr. Usman / Dr. Ali / Dr. Ahmed: 500 Rs\n• Dr. Fatima / Dr. Ayesha: 400 Rs\n\nAppointment book karni ho to doctor ka naam ya 'Appointment' likh dein. 😊" };
-  }
-
-  if (low.includes("timing") || low.includes("time") || low.includes("kab") || low.includes("khulta")) {
-    return { type: "none", reply: `Clinic Timing: Peer - Hafta Subah 10 se Raat 10 baje (Itwaar band).\nAddress: Main Boulevard, Lahore.\n\n${doctorsListText()}\nKis doctor se milna hai?` };
-  }
-
-  if (matchedDoc) {
-    user.step = "ask_name";
-    return { type: "none", reply: `${matchedDoc.name} (${matchedDoc.timing}, Fees ${matchedDoc.fees}) select ho gaye. 👨‍⚕️\n\nApna poora naam bata dein?` };
-  }
-
-  user.step = "ask_name";
   return {
     type: "none",
-    reply: `Assalam-o-Alaikum! Main Clinic Assistant hoon. 😊\n\n${doctorsListText()}\nAppointment book karne ke liye pehle apna naam bata dein (ya doctor ka naam likh dein)?`
+    reply: `Assalam-o-Alaikum! Main Clinic Assistant hoon. 😊\n\n${doctorsListText()}\nAppointment book karne ke liye apna naam bata dein?`
   };
 }
 
@@ -287,7 +355,7 @@ module.exports = async (req, res) => {
       const text = msg.text?.body || "";
 
       if (!users[from]) {
-        users[from] = { step: "menu", name: "", day: "", time: "", problem: "", doctor: null, lastBooked: null, history: [] };
+        users[from] = { step: "ask_name", name: "", day: "", time: "", problem: "", doctor: null, lastBooked: null, history: [] };
       }
 
       const user = users[from];
@@ -300,7 +368,6 @@ module.exports = async (req, res) => {
       let doctorMsg = "";
 
       if (!ai) {
-        // AI busy ho to patient ko rokne ke bajaye foran backup flow se madad karein
         const backup = handleInstantBackup(user, text);
 
         if (backup.type === "book") {
