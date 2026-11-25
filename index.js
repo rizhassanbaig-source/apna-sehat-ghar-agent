@@ -128,6 +128,8 @@ async function sendWhatsApp(to, bodyText) {
   });
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // ============ AI AGENT BRAIN ============
 async function runAgent(user, userMessage) {
   if (!GEMINI_API_KEY) return { data: null, error: "GEMINI_API_KEY missing in environment variables" };
@@ -185,30 +187,37 @@ Sirf JSON format me jawab do:
   let lastError = "No response from Gemini";
 
   for (const model of models) {
-    try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.4,
-            responseMimeType: "application/json"
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.4,
+              responseMimeType: "application/json"
+            }
+          })
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          lastError = `${model}: ${data?.error?.message || res.status}`;
+          if (res.status === 429 || res.status === 503) {
+            await sleep(800);
+            continue;
           }
-        })
-      });
+          break;
+        }
 
-      const data = await res.json();
-      if (!res.ok) {
-        lastError = `${model}: ${data?.error?.message || res.status}`;
-        continue;
+        let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        raw = raw.replace(/```json/g, "").replace(/```/g, "").trim();
+        return { data: JSON.parse(raw), error: null };
+      } catch (e) {
+        lastError = `${model}: ${e.message || String(e)}`;
+        await sleep(500);
       }
-
-      let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      raw = raw.replace(/```json/g, "").replace(/```/g, "").trim();
-      return { data: JSON.parse(raw), error: null };
-    } catch (e) {
-      lastError = `${model}: ${e.message || String(e)}`;
     }
   }
   return { data: null, error: lastError };
@@ -243,7 +252,7 @@ module.exports = async (req, res) => {
       const ai = agentRes?.data;
 
       if (!ai) {
-        await sendWhatsApp(from, "AI Error: " + (agentRes?.error || "Unknown"));
+        await sendWhatsApp(from, "Abhi system par thora zyada rush hai, barah-e-karam 1 minute baad dobara message bhejein. 😊🙏");
         return res.status(200).send("OK");
       }
 
