@@ -16,6 +16,14 @@ const DOCTORS = [
 
 const FORM_ID = "1FAIpQLScIb7q0BfmGFk-cSLmqFYUi4RTVOosxgiltDrvJ-66DPLq9bQ";
 
+function doctorsListText() {
+  let t = "Hamare Doctors: 👨‍⚕️\n\n";
+  DOCTORS.forEach((d, i) => {
+    t += `${i + 1}. ${d.name} - ${d.timing} - Fees ${d.fees}\n`;
+  });
+  return t;
+}
+
 function findDoctor(text) {
   if (!text) return null;
   const low = text.toLowerCase();
@@ -128,18 +136,16 @@ async function sendWhatsApp(to, bodyText) {
   });
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 // ============ AI AGENT BRAIN ============
 async function runAgent(user, userMessage) {
-  if (!GEMINI_API_KEY) return { data: null, error: "GEMINI_API_KEY missing in environment variables" };
+  if (!GEMINI_API_KEY) return null;
 
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
   const doctorsInfo = DOCTORS.map((d, i) => `${i + 1}. ${d.name} | Timing: ${d.timing} | Fees: ${d.fees}`).join("\n");
   const historyText = user.history.slice(-8).join("\n");
 
   const prompt = `Tum ek Clinic ke Smart AI Receptionist Agent ho. Tumhara naam "Clinic Assistant" hai.
-Tum Roman Urdu me bilkul natural, dostana aur insanon jese baat karte ho (robot ki tarah numbered menus mat do jab tak doctors ki list na poochi jaye).
+Tum Roman Urdu me bilkul natural, dostana aur insanon jese baat karte ho.
 
 Aaj ki tareekh (YYYY-MM-DD): ${todayStr}
 Clinic Timing: Peer se Hafta Subah 10 se Raat 10 baje tak (Itwaar band).
@@ -150,13 +156,8 @@ ${doctorsInfo}
 
 TUMHARI ZIMMEDARIYAN:
 1. User ke message ko samjho: kya wo appointment book karna chahta hai, timing/fees/doctors/address pooch raha hai, ya appointment cancel karna chahta hai?
-2. Appointment book karne ke liye ye 5 maloomat zaroori hain:
-   - doctor (Doctors list me se koi ek)
-   - name (Patient ka naam)
-   - day (Appointment ki tareekh - guzri hui ya ghalat date jese 32 Nov accept mat karna)
-   - time (Kis waqt aana hai - Doctor ki timing ke andar hona chahiye)
-   - problem (Kya takleef ya bimari hai)
-3. Agar user ek hi message me 2, 3 ya saari cheezein bata de (jese: "Main Ali hoon, kal sham 7 baje Dr Ali Raza ko bukhar dikhana hai"), to saari maloomat ek hi baar me nikal lo aur jo cheez reh gayi ho sirf wahi pyar se poocho.
+2. Appointment book karne ke liye ye 5 maloomat zaroori hain: doctor, name, day, time, problem.
+3. Agar user ek hi message me 2, 3 ya saari cheezein bata de to saari maloomat ek hi baar me nikal lo aur jo cheez reh gayi ho sirf wahi pyar se poocho.
 4. Agar saari 5 maloomat mil jayein to "action" ko "book" kar do.
 5. Agar user cancel karne ko kahe to "action" ko "cancel" kar do.
 
@@ -184,43 +185,88 @@ Sirf JSON format me jawab do:
 }`;
 
   const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
-  let lastError = "No response from Gemini";
 
   for (const model of models) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.4,
-              responseMimeType: "application/json"
-            }
-          })
-        });
-
-        const data = await res.json();
-        if (!res.ok) {
-          lastError = `${model}: ${data?.error?.message || res.status}`;
-          if (res.status === 429 || res.status === 503) {
-            await sleep(800);
-            continue;
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.4,
+            responseMimeType: "application/json"
           }
-          break;
-        }
+        })
+      });
 
-        let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        raw = raw.replace(/```json/g, "").replace(/```/g, "").trim();
-        return { data: JSON.parse(raw), error: null };
-      } catch (e) {
-        lastError = `${model}: ${e.message || String(e)}`;
-        await sleep(500);
-      }
+      const data = await res.json();
+      if (!res.ok) continue;
+
+      let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      raw = raw.replace(/```json/g, "").replace(/```/g, "").trim();
+      return JSON.parse(raw);
+    } catch (e) {
+      continue;
     }
   }
-  return { data: null, error: lastError };
+  return null;
+}
+
+// ============ INSTANT BACKUP FLOW (JAB AI BUSY HO) ============
+function handleInstantBackup(user, text) {
+  const low = text.toLowerCase().trim();
+  const matchedDoc = findDoctor(text);
+  if (matchedDoc) user.doctor = matchedDoc;
+
+  if (!user.step) user.step = "menu";
+
+  if (low.includes("cancel")) {
+    return { type: "cancel", reply: "Theek hai, aapki Appointment *CANCELLED* kar di hai. ❌\nDobara zaroorat ho to bata dein. 😊" };
+  }
+
+  if (user.step === "ask_name") {
+    user.name = text;
+    user.step = "ask_day";
+    return { type: "none", reply: `Shukriya ${user.name}! 😊 Kis date ko aana hai? (Jese: Aaj, Kal, 26 November)` };
+  }
+
+  if (user.step === "ask_day") {
+    user.day = text;
+    user.step = "ask_time";
+    return { type: "none", reply: `Theek hai, ${user.day} ko kis time aana chahein ge? (Jese: 6 baje, Sham ko)` };
+  }
+
+  if (user.step === "ask_time") {
+    user.time = text;
+    user.step = "ask_problem";
+    return { type: "none", reply: "Aakhri baat: kya takleef ya checkup karwana hai? (Jese: Bukhar, Pait dard)" };
+  }
+
+  if (user.step === "ask_problem") {
+    user.problem = text;
+    user.step = "menu";
+    return { type: "book", reply: "" };
+  }
+
+  if (low.includes("fee") || low.includes("fees") || low.includes("paisa") || low.includes("charges")) {
+    return { type: "none", reply: "Clinic ki Fees:\n• Dr. Usman / Dr. Ali / Dr. Ahmed: 500 Rs\n• Dr. Fatima / Dr. Ayesha: 400 Rs\n\nAppointment book karni ho to doctor ka naam ya 'Appointment' likh dein. 😊" };
+  }
+
+  if (low.includes("timing") || low.includes("time") || low.includes("kab") || low.includes("khulta")) {
+    return { type: "none", reply: `Clinic Timing: Peer - Hafta Subah 10 se Raat 10 baje (Itwaar band).\nAddress: Main Boulevard, Lahore.\n\n${doctorsListText()}\nKis doctor se milna hai?` };
+  }
+
+  if (matchedDoc) {
+    user.step = "ask_name";
+    return { type: "none", reply: `${matchedDoc.name} (${matchedDoc.timing}, Fees ${matchedDoc.fees}) select ho gaye. 👨‍⚕️\n\nApna poora naam bata dein?` };
+  }
+
+  user.step = "ask_name";
+  return {
+    type: "none",
+    reply: `Assalam-o-Alaikum! Main Clinic Assistant hoon. 😊\n\n${doctorsListText()}\nAppointment book karne ke liye pehle apna naam bata dein (ya doctor ka naam likh dein)?`
+  };
 }
 
 module.exports = async (req, res) => {
@@ -241,51 +287,62 @@ module.exports = async (req, res) => {
       const text = msg.text?.body || "";
 
       if (!users[from]) {
-        users[from] = { name: "", day: "", time: "", problem: "", doctor: null, lastBooked: null, history: [] };
+        users[from] = { step: "menu", name: "", day: "", time: "", problem: "", doctor: null, lastBooked: null, history: [] };
       }
 
       const user = users[from];
       user.history.push(`User: ${text}`);
       if (user.history.length > 10) user.history = user.history.slice(-10);
 
-      const agentRes = await runAgent(user, text);
-      const ai = agentRes?.data;
+      const ai = await runAgent(user, text);
 
-      if (!ai) {
-        await sendWhatsApp(from, "Abhi system par thora zyada rush hai, barah-e-karam 1 minute baad dobara message bhejein. 😊🙏");
-        return res.status(200).send("OK");
-      }
-
-      if (ai.doctor && ai.doctor !== "null") {
-        const matched = findDoctor(ai.doctor);
-        if (matched) user.doctor = matched;
-      }
-      if (ai.name && ai.name !== "null") user.name = ai.name;
-      if (ai.day && ai.day !== "null") user.day = ai.day;
-      if (ai.time && ai.time !== "null") user.time = ai.time;
-      if (ai.problem && ai.problem !== "null") user.problem = ai.problem;
-
-      let reply = ai.reply || "Ji batayein, main aapki kya madad kar sakta hoon? 😊";
+      let reply = "";
       let doctorMsg = "";
 
-      if (ai.action === "book" && user.name && user.day && user.time && user.problem) {
-        const doc = user.doctor || DOCTORS[0];
-        user.lastBooked = { name: user.name, day: user.day, time: user.time, problem: user.problem, doctor: doc };
+      if (!ai) {
+        // AI busy ho to patient ko rokne ke bajaye foran backup flow se madad karein
+        const backup = handleInstantBackup(user, text);
 
-        reply = `✅ *Appointment Book Ho Gayi!*\n\n👤 *Naam:* ${user.name}\n📅 *Date:* ${user.day}\n⏰ *Time:* ${user.time}\n🤒 *Takleef:* ${user.problem}\n👨‍⚕️ *Doctor:* ${doc.name}\n💰 *Fees:* ${doc.fees}\n\nShukriya! Allah Shifa de. 🤲\nCancel karni ho to 'Cancel' likh dein.`;
-
-        doctorMsg = `🔔 *NAYI APPOINTMENT!* 🔔\n\n👤 *Patient:* ${user.name}\n📱 *Number:* ${from}\n📅 *Date:* ${user.day}\n⏰ *Time:* ${user.time}\n🤒 *Takleef:* ${user.problem}\n👨‍⚕️ *Doctor:* ${doc.name}`;
-
-        await saveToSheet(user.lastBooked, from);
-        user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null;
-      }
-
-      if (ai.action === "cancel") {
-        if (user.lastBooked) {
-          await saveToSheet(user.lastBooked, from, true);
+        if (backup.type === "book") {
+          const doc = user.doctor || DOCTORS[0];
+          user.lastBooked = { name: user.name || from, day: user.day || "Aaj", time: user.time || "6 baje", problem: user.problem || "Checkup", doctor: doc };
+          reply = `✅ *Appointment Book Ho Gayi!*\n\n👤 *Naam:* ${user.lastBooked.name}\n📅 *Date:* ${user.lastBooked.day}\n⏰ *Time:* ${user.lastBooked.time}\n🤒 *Takleef:* ${user.lastBooked.problem}\n👨‍⚕️ *Doctor:* ${doc.name}\n💰 *Fees:* ${doc.fees}\n\nShukriya! Allah Shifa de. 🤲`;
+          doctorMsg = `🔔 *NAYI APPOINTMENT!* 🔔\n\n👤 *Patient:* ${user.lastBooked.name}\n📱 *Number:* ${from}\n📅 *Date:* ${user.lastBooked.day}\n⏰ *Time:* ${user.lastBooked.time}\n🤒 *Takleef:* ${user.lastBooked.problem}\n👨‍⚕️ *Doctor:* ${doc.name}`;
+          await saveToSheet(user.lastBooked, from);
+          user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null;
+        } else if (backup.type === "cancel") {
+          if (user.lastBooked) await saveToSheet(user.lastBooked, from, true);
+          reply = backup.reply;
+          user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null;
+        } else {
+          reply = backup.reply;
         }
-        reply = "Theek hai, aapki Appointment *CANCELLED* kar di hai. ❌\nSheet me bhi CANCELLED update kar diya hai. Dobara zaroorat ho to bata dein. 😊";
-        user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null;
+      } else {
+        if (ai.doctor && ai.doctor !== "null") {
+          const matched = findDoctor(ai.doctor);
+          if (matched) user.doctor = matched;
+        }
+        if (ai.name && ai.name !== "null") user.name = ai.name;
+        if (ai.day && ai.day !== "null") user.day = ai.day;
+        if (ai.time && ai.time !== "null") user.time = ai.time;
+        if (ai.problem && ai.problem !== "null") user.problem = ai.problem;
+
+        reply = ai.reply || "Ji batayein, main aapki kya madad kar sakta hoon? 😊";
+
+        if (ai.action === "book" && user.name && user.day && user.time && user.problem) {
+          const doc = user.doctor || DOCTORS[0];
+          user.lastBooked = { name: user.name, day: user.day, time: user.time, problem: user.problem, doctor: doc };
+          reply = `✅ *Appointment Book Ho Gayi!*\n\n👤 *Naam:* ${user.name}\n📅 *Date:* ${user.day}\n⏰ *Time:* ${user.time}\n🤒 *Takleef:* ${user.problem}\n👨‍⚕️ *Doctor:* ${doc.name}\n💰 *Fees:* ${doc.fees}\n\nShukriya! Allah Shifa de. 🤲\nCancel karni ho to 'Cancel' likh dein.`;
+          doctorMsg = `🔔 *NAYI APPOINTMENT!* 🔔\n\n👤 *Patient:* ${user.name}\n📱 *Number:* ${from}\n📅 *Date:* ${user.day}\n⏰ *Time:* ${user.time}\n🤒 *Takleef:* ${user.problem}\n👨‍⚕️ *Doctor:* ${doc.name}`;
+          await saveToSheet(user.lastBooked, from);
+          user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null;
+        }
+
+        if (ai.action === "cancel") {
+          if (user.lastBooked) await saveToSheet(user.lastBooked, from, true);
+          reply = "Theek hai, aapki Appointment *CANCELLED* kar di hai. ❌\nSheet me bhi CANCELLED update kar diya hai. Dobara zaroorat ho to bata dein. 😊";
+          user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null;
+        }
       }
 
       user.history.push(`Agent: ${reply}`);
