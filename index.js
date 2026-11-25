@@ -4,8 +4,6 @@ const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const DOCTOR_NUMBER = "923364776344";
 
-// Note: Vercel serverless mein memory har request par reset ho sakti hai,
-// is liye short conversations ke liye ye kaam karega.
 const users = {};
 
 const DOCTORS = [
@@ -86,7 +84,7 @@ async function saveToSheet(user, from, isCancel = false) {
     params.append("entry.2046298723", user.name || from);
     params.append("entry.1419912836", from);
     params.append("entry.913984501", isCancel ? "CANCELLED - " + (user.problem || "") : (user.problem || ""));
-    
+
     let docName = "Dr. Usman Iqbal";
     if (user.doctor && user.doctor.name) docName = user.doctor.name;
     else if (typeof user.doctor === 'string' && user.doctor) docName = user.doctor;
@@ -126,7 +124,6 @@ async function sendWhatsApp(to, bodyText) {
 
 // ============ AGENT BRAIN - GEMINI ============
 async function askAgent(user, userMessage) {
-  // Pakistan Time (PKT) ke mutabiq aaj ki tareekh
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
   const doctorsInfo = DOCTORS.map((d, i) => `${i + 1}. ${d.name} - Timing: ${d.timing} - Fees: ${d.fees}`).join("\n");
   const recentHistory = user.history.slice(-6).join("\n");
@@ -180,6 +177,10 @@ Rules:
 - "reply" me kabhi JSON ka zikar mat karo.`;
 
   try {
+    if (!GEMINI_API_KEY) {
+      return { data: null, error: "GEMINI_API_KEY missing in env" };
+    }
+
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -194,16 +195,14 @@ Rules:
 
     const data = await res.json();
     if (!res.ok) {
-      console.error("Gemini API Error:", JSON.stringify(data));
-      return null;
+      return { data: null, error: data?.error?.message || `HTTP ${res.status}` };
     }
 
     let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
     raw = raw.replace(/```json/g, "").replace(/```/g, "").trim();
-    return JSON.parse(raw);
+    return { data: JSON.parse(raw), error: null };
   } catch (e) {
-    console.error("Gemini Exception:", e);
-    return null;
+    return { data: null, error: e.message || String(e) };
   }
 }
 
@@ -223,7 +222,6 @@ module.exports = async (req, res) => {
       const value = body.entry?.[0]?.changes?.[0]?.value;
       const msg = value?.messages?.[0];
 
-      // Status updates (sent, delivered, read) ko ignore karein
       if (!msg || msg.type !== "text") {
         return res.status(200).send("OK");
       }
@@ -240,11 +238,11 @@ module.exports = async (req, res) => {
       if (user.history.length > 10) user.history = user.history.slice(-10);
 
       // AGENT SE POOCHO
-      let ai = await askAgent(user, text);
+      let aiResult = await askAgent(user, text);
+      let ai = aiResult?.data;
 
-      // Agar Gemini API key ghalat ho ya fail ho jaye
       if (!ai) {
-        await sendWhatsApp(from, "Assalam-o-Alaikum! Main Clinic Assistant hon. 😊\n\nKya madad karun? Appointment book karni hai, Timing ya Fees poochni hai?\n\nBas apni baat likh dein, jese: 'Mujhe kal sham ko Dr Usman se milna hai'");
+        await sendWhatsApp(from, "Debug Error: " + (aiResult?.error || "Unknown Gemini Error"));
         return res.status(200).send("OK");
       }
 
@@ -266,11 +264,11 @@ module.exports = async (req, res) => {
       if (ai.action === "book") {
         const assignedDoc = user.doctor || DOCTORS[0];
         user.lastBooked = { name: user.name, day: user.day, time: user.time, problem: user.problem, doctor: assignedDoc };
-        
+
         reply = `✅ *Appointment Book Ho Gayi!*\n\n👤 *Naam:* ${user.name}\n📅 *Date:* ${user.day}\n⏰ *Time:* ${user.time}\n🤒 *Takleef:* ${user.problem}\n👨‍⚕️ *Doctor:* ${assignedDoc.name}\n💰 *Fees:* ${assignedDoc.fees}\n\nShukriya! Allah Shifa de. 🤲\n\nCancel karni ho to 'Cancel' likh dein.`;
-        
+
         doctorMsg = `🔔 *NAYI APPOINTMENT!* 🔔\n\n👤 *Patient:* ${user.name}\n📱 *Number:* ${from}\n📅 *Date:* ${user.day}\n⏰ *Time:* ${user.time}\n🤒 *Takleef:* ${user.problem}\n👨‍⚕️ *Doctor:* ${assignedDoc.name}`;
-        
+
         await saveToSheet(user.lastBooked, from);
         user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null;
       }
