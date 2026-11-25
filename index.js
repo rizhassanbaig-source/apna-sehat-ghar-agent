@@ -3,7 +3,7 @@ const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// Yahan apne asli numbers (923XXXXXXXXX format me) dalein
+// Yahan apne asli numbers (923364776344 format me) dalein
 const DOCTOR_NUMBER = "923364776344";
 const CLINIC_NUMBER = "923364776344"; // <-- Yahan Clinic ka WhatsApp number likhein
 
@@ -70,13 +70,14 @@ function extractNameSmart(text) {
 function validateAndFormatDate(dateText) {
   const raw = (dateText || "").trim();
   const low = raw.toLowerCase();
-  const today = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Karachi" }));
+  const nowPK = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Karachi" }));
+  const todayMidnight = new Date(nowPK.getFullYear(), nowPK.getMonth(), nowPK.getDate());
 
   if (low.includes("aaj") || low.includes("today")) {
-    return { valid: true, formatted: "Aaj", iso: today.toISOString().split('T')[0] };
+    return { valid: true, formatted: "Aaj", iso: todayMidnight.toISOString().split('T')[0] };
   }
   if (low.includes("kal") || low.includes("tomorrow")) {
-    const t = new Date(today);
+    const t = new Date(todayMidnight);
     t.setDate(t.getDate() + 1);
     return { valid: true, formatted: "Kal", iso: t.toISOString().split('T')[0] };
   }
@@ -87,21 +88,45 @@ function validateAndFormatDate(dateText) {
     if (dayNum < 1 || dayNum > 31) {
       return { valid: false, reason: `${dayNum} koi valid date nahi hoti. Mehine ki date 1 se 30/31 ke darmiyan hoti hai.` };
     }
-    if (today.getMonth() === 10 && !low.includes("dec") && !low.includes("jan") && dayNum > 30) {
-      return { valid: false, reason: `November me sirf 30 din hote hain, ${dayNum} November nahi hoti.` };
+
+    let targetMonth = nowPK.getMonth();
+    let targetYear = nowPK.getFullYear();
+
+    const months = {
+      "jan": 0, "january": 0, "feb": 1, "february": 1, "mar": 2, "march": 2,
+      "apr": 3, "april": 3, "may": 4, "jun": 5, "june": 5, "jul": 6, "july": 6,
+      "aug": 7, "august": 7, "sep": 8, "september": 8, "oct": 9, "october": 9,
+      "nov": 10, "november": 10, "dec": 11, "december": 11
+    };
+
+    for (const key in months) {
+      if (new RegExp(`\\b${key}\\b`, "i").test(low)) {
+        targetMonth = months[key];
+        break;
+      }
     }
-    const dt = new Date(today.getFullYear(), today.getMonth(), dayNum);
-    if (dt < new Date(today.getFullYear(), today.getMonth(), today.getDate())) {
-      dt.setMonth(dt.getMonth() + 1);
+
+    const daysInMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+    if (dayNum > daysInMonth) {
+      return { valid: false, reason: `Is mahine me sirf ${daysInMonth} din hain, ${dayNum} valid date nahi hai.` };
     }
-    return { valid: true, formatted: raw, iso: dt.toISOString().split('T')[0] };
+
+    const candidateDate = new Date(targetYear, targetMonth, dayNum);
+    if (candidateDate < todayMidnight) {
+      return {
+        valid: false,
+        reason: `"${raw}" guzri hui tareekh hai. Meherbani kar ke aaj ya aane wali tareekh batayein.`
+      };
+    }
+
+    return { valid: true, formatted: raw, iso: candidateDate.toISOString().split('T')[0] };
   }
 
   const days = { "itwaar": 0, "sunday": 0, "peer": 1, "monday": 1, "mangal": 2, "tuesday": 2, "budh": 3, "wednesday": 3, "jumerat": 4, "thursday": 4, "juma": 5, "friday": 5, "hafta": 6, "saturday": 6 };
   for (let key in days) {
     if (low.includes(key)) {
       const target = days[key];
-      const d = new Date(today);
+      const d = new Date(todayMidnight);
       let diff = (target - d.getDay() + 7) % 7;
       if (diff === 0) diff = 7;
       d.setDate(d.getDate() + diff);
@@ -236,7 +261,7 @@ TUMHARI ZIMMEDARIYAN:
 1. User ke message ko samjho: kya wo appointment book karna chahta hai, doctors list/timing/fees/address pooch raha hai, salam kar raha hai, ya appointment cancel karna chahta hai?
 2. Appointment book karne ke liye ye 5 maloomat zaroori hain: doctor, name, day, time, problem.
 3. Agar user kahe ke "kuch nahi check karwana" to samjho ke usko checkup/masla clear nahi hai ya usay appointment ki zaroorat nahi; pyar se poochho ke kya checkup karwana hai ya koi aur madad chahiye.
-4. Agar user ghalat tareekh (jese 32 Nov) ya ghalat waqt (jese 13 bajey) bataye to pyar se durust tareekh/waqt poochho.
+4. Agar user guzri hui ya ghalat tareekh (jese 32 Nov ya pehle guzri date) ya ghalat waqt (jese 13 bajey) bataye to pyar se durust tareekh/waqt poochho.
 5. Agar user saari 5 maloomat de de to "action" ko "book" kar do.
 6. Agar user cancel karne ko kahe to "action" ko "cancel" kar do.
 
