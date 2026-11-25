@@ -16,14 +16,6 @@ const DOCTORS = [
 
 const FORM_ID = "1FAIpQLScIb7q0BfmGFk-cSLmqFYUi4RTVOosxgiltDrvJ-66DPLq9bQ";
 
-function doctorsListText() {
-  let t = "Hamare Doctors: 👨‍⚕️\n\n";
-  DOCTORS.forEach((d, i) => {
-    t += `${i + 1}. ${d.name} - ${d.timing} - Fees ${d.fees}\n`;
-  });
-  return t;
-}
-
 function findDoctor(text) {
   if (!text) return null;
   const low = text.toLowerCase();
@@ -138,7 +130,7 @@ async function sendWhatsApp(to, bodyText) {
 
 // ============ AI AGENT BRAIN ============
 async function runAgent(user, userMessage) {
-  if (!GEMINI_API_KEY) return null;
+  if (!GEMINI_API_KEY) return { data: null, error: "GEMINI_API_KEY missing in environment variables" };
 
   const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
   const doctorsInfo = DOCTORS.map((d, i) => `${i + 1}. ${d.name} | Timing: ${d.timing} | Fees: ${d.fees}`).join("\n");
@@ -189,8 +181,8 @@ Sirf JSON format me jawab do:
   "action": "none | book | cancel"
 }`;
 
-  // Models try list (taake agar ek model key par available na ho to doosra chal jaye)
   const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
+  let lastError = "No response from Gemini";
 
   for (const model of models) {
     try {
@@ -208,18 +200,18 @@ Sirf JSON format me jawab do:
 
       const data = await res.json();
       if (!res.ok) {
-        console.log(`Model ${model} failed:`, data?.error?.message);
+        lastError = `${model}: ${data?.error?.message || res.status}`;
         continue;
       }
 
       let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
       raw = raw.replace(/```json/g, "").replace(/```/g, "").trim();
-      return JSON.parse(raw);
+      return { data: JSON.parse(raw), error: null };
     } catch (e) {
-      console.log(`Model ${model} exception:`, e.message);
+      lastError = `${model}: ${e.message || String(e)}`;
     }
   }
-  return null;
+  return { data: null, error: lastError };
 }
 
 module.exports = async (req, res) => {
@@ -247,16 +239,14 @@ module.exports = async (req, res) => {
       user.history.push(`User: ${text}`);
       if (user.history.length > 10) user.history = user.history.slice(-10);
 
-      // AI Agent ko call karein
-      const ai = await runAgent(user, text);
+      const agentRes = await runAgent(user, text);
+      const ai = agentRes?.data;
 
       if (!ai) {
-        // Agar GEMINI_API_KEY missing ya invalid ho
-        await sendWhatsApp(from, "Assalam-o-Alaikum! Main Clinic Assistant hoon. 😊\n(Note: AI Brain connect nahi ho raha, please Vercel me GEMINI_API_KEY check karein).\n\n" + doctorsListText());
+        await sendWhatsApp(from, "AI Error: " + (agentRes?.error || "Unknown"));
         return res.status(200).send("OK");
       }
 
-      // Agent ke mutabiq State update karein
       if (ai.doctor && ai.doctor !== "null") {
         const matched = findDoctor(ai.doctor);
         if (matched) user.doctor = matched;
@@ -269,7 +259,6 @@ module.exports = async (req, res) => {
       let reply = ai.reply || "Ji batayein, main aapki kya madad kar sakta hoon? 😊";
       let doctorMsg = "";
 
-      // Agar 5 cheezein poori hon aur Agent ne book kiya ho
       if (ai.action === "book" && user.name && user.day && user.time && user.problem) {
         const doc = user.doctor || DOCTORS[0];
         user.lastBooked = { name: user.name, day: user.day, time: user.time, problem: user.problem, doctor: doc };
@@ -282,7 +271,6 @@ module.exports = async (req, res) => {
         user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null;
       }
 
-      // Agar Cancel kiya ho
       if (ai.action === "cancel") {
         if (user.lastBooked) {
           await saveToSheet(user.lastBooked, from, true);
