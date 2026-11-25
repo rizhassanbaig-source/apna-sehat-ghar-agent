@@ -2,7 +2,10 @@ const VERIFY_TOKEN = "clinic123";
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+// Yahan apne asli numbers (923XXXXXXXXX format me) dalein
 const DOCTOR_NUMBER = "923364776344";
+const CLINIC_NUMBER = "923364776344"; // <-- Yahan Clinic ka WhatsApp number likhein
 
 const users = {};
 
@@ -40,13 +43,17 @@ function extractNameSmart(text) {
   const clean = (text || "").trim();
   const low = clean.toLowerCase();
 
-  // Agar sawal lag raha ho ya bohot lamba jumla ho
-  if (low.includes("kiya ") || low.includes("kya ") || low.includes("?") || clean.split(/\s+/).length > 5) {
+  const greetingsAndCommands = [
+    "hi", "hii", "hiii", "hello", "hey", "salam", "assalam", "assalam-o-alaikum",
+    "dr list", "doctor list", "doctors", "menu", "reset", "cancel", "fees", "fee", "timing"
+  ];
+  if (greetingsAndCommands.includes(low)) return null;
+  if (low.startsWith("dr ") || low.startsWith("dr.") || low.includes("appointment")) return null;
+  if (low.includes("kiya ") || low.includes("kya ") || low.includes("?") || clean.split(/\s+/).length > 4) {
     const match = clean.match(/(?:mera\s+naam|naam|name)\s+(?:hai\s+)?([a-zA-Z\u0600-\u06FF]+(?:\s+[a-zA-Z\u0600-\u06FF]+)?)/i);
     if (match && match[1]) {
       const candidate = match[1].trim();
-      const badWords = ["ali hai", "kya", "kiya", "appointment", "book", "doctor"];
-      if (!badWords.includes(candidate.toLowerCase())) return candidate;
+      if (!greetingsAndCommands.includes(candidate.toLowerCase())) return candidate;
     }
     return null;
   }
@@ -54,7 +61,7 @@ function extractNameSmart(text) {
   const match = clean.match(/(?:mera\s+naam|naam|name)\s+(?:hai\s+)?(.+)/i);
   if (match && match[1]) return match[1].trim();
 
-  if (/^[a-zA-Z\u0600-\u06FF\s]{2,35}$/.test(clean) && !/\d/.test(clean)) {
+  if (/^[a-zA-Z\u0600-\u06FF\s]{2,30}$/.test(clean) && !/\d/.test(clean)) {
     return clean;
   }
   return null;
@@ -74,14 +81,12 @@ function validateAndFormatDate(dateText) {
     return { valid: true, formatted: "Kal", iso: t.toISOString().split('T')[0] };
   }
 
-  // Check explicit day number like "32 date ko", "31", "28 ko"
   const dayMatch = low.match(/\b(\d{1,2})\b/);
   if (dayMatch) {
     const dayNum = parseInt(dayMatch[1], 10);
     if (dayNum < 1 || dayNum > 31) {
       return { valid: false, reason: `${dayNum} koi valid date nahi hoti. Mehine ki date 1 se 30/31 ke darmiyan hoti hai.` };
     }
-    // November has 30 days
     if (today.getMonth() === 10 && !low.includes("dec") && !low.includes("jan") && dayNum > 30) {
       return { valid: false, reason: `November me sirf 30 din hote hain, ${dayNum} November nahi hoti.` };
     }
@@ -123,7 +128,6 @@ function validateAndFormatTime(timeText) {
     return { valid: false, reason: `"${raw}" valid time nahi hai. Barah-e-karam 1 se 12 ke darmiyan time batayein (jese: 6 baje ya 7 baje).` };
   }
 
-  // Agar user "13 bajey" likhe to samjhayein
   if (hour > 12 && !low.includes(":")) {
     return { valid: false, reason: `Ghari me 13 bajey nahi hote 😊. Agar dopahar/shaam ka 1 bajta hai to "1 baje dopahar" likhein, warna apna pasandida time (jese 6 baje) batayein.` };
   }
@@ -179,19 +183,35 @@ async function saveToSheet(user, from, isCancel = false) {
 }
 
 async function sendWhatsApp(to, bodyText) {
-  await fetch(`https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${WHATSAPP_TOKEN}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      messaging_product: "whatsapp",
-      to: to,
-      type: "text",
-      text: { body: bodyText }
-    })
-  });
+  if (!to) return;
+  try {
+    const res = await fetch(`https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to: to,
+        type: "text",
+        text: { body: bodyText }
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      console.log(`WhatsApp send error to ${to}:`, JSON.stringify(data));
+    }
+  } catch (e) {
+    console.log(`WhatsApp fetch error to ${to}:`, e);
+  }
+}
+
+async function notifyStaff(messageText) {
+  const recipients = [...new Set([DOCTOR_NUMBER, CLINIC_NUMBER].filter(Boolean))];
+  for (const num of recipients) {
+    await sendWhatsApp(num, messageText);
+  }
 }
 
 // ============ AI AGENT BRAIN ============
@@ -213,11 +233,12 @@ DOCTORS KI LIST:
 ${doctorsInfo}
 
 TUMHARI ZIMMEDARIYAN:
-1. User ke message ko samjho: kya wo appointment book karna chahta hai, timing/fees/doctors/address/rule pooch raha hai, ya appointment cancel karna chahta hai?
+1. User ke message ko samjho: kya wo appointment book karna chahta hai, doctors list/timing/fees/address pooch raha hai, salam kar raha hai, ya appointment cancel karna chahta hai?
 2. Appointment book karne ke liye ye 5 maloomat zaroori hain: doctor, name, day, time, problem.
-3. Agar user ghalat tareekh (jese 32 Nov) ya ghalat waqt (jese 13 bajey) ya doctor ki timing ke bahar ka waqt bataye to pyar se durust tareekh/waqt poochho.
-4. Agar user saari 5 maloomat de de to "action" ko "book" kar do.
-5. Agar user cancel karne ko kahe to "action" ko "cancel" kar do.
+3. Agar user kahe ke "kuch nahi check karwana" to samjho ke usko checkup/masla clear nahi hai ya usay appointment ki zaroorat nahi; pyar se poochho ke kya checkup karwana hai ya koi aur madad chahiye.
+4. Agar user ghalat tareekh (jese 32 Nov) ya ghalat waqt (jese 13 bajey) bataye to pyar se durust tareekh/waqt poochho.
+5. Agar user saari 5 maloomat de de to "action" ko "book" kar do.
+6. Agar user cancel karne ko kahe to "action" ko "cancel" kar do.
 
 PICHLI GUFTAGU:
 ${historyText}
@@ -274,21 +295,45 @@ Sirf JSON format me jawab do:
 // ============ SMART BACKUP FLOW ============
 function handleInstantBackup(user, text) {
   const low = text.toLowerCase().trim();
-  const matchedDoc = findDoctor(text);
-  if (matchedDoc) user.doctor = matchedDoc;
-
-  if (!user.step) user.step = "ask_name";
+  if (!user.step) user.step = "idle";
 
   if (low === "cancel" || low.includes("cancel appointment")) {
-    user.step = "ask_name";
+    user.step = "idle";
+    user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null;
     return { type: "cancel", reply: "Theek hai, aapki Appointment *CANCELLED* kar di hai. ❌\nDobara zaroorat ho to bata dein. 😊" };
   }
 
   if (low === "reset" || low === "menu") {
-    user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null; user.step = "ask_name";
+    user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null; user.step = "idle";
     return {
       type: "none",
-      reply: `Assalam-o-Alaikum! Main Clinic Assistant hoon. 😊\n\n${doctorsListText()}\nAppointment book karne ke liye pehle apna naam bata dein?`
+      reply: `Assalam-o-Alaikum! Main Clinic Assistant hoon. 😊\n\n${doctorsListText()}\nAppointment book karne ke liye doctor ka naam ya 'Appointment' likhein.`
+    };
+  }
+
+  if (low.includes("dr list") || low.includes("doctor list") || low === "doctors" || low.includes("fee") || low.includes("fees") || low.includes("timing")) {
+    user.step = "idle";
+    return {
+      type: "none",
+      reply: `${doctorsListText()}\nClinic Timing: Peer - Hafta Subah 10 se Raat 10 baje (Itwaar band).\nKis doctor se appointment leni hai?`
+    };
+  }
+
+  const matchedDoc = findDoctor(text);
+  if (matchedDoc && (low.includes("appointment") || low.includes("dr") || low.includes("doctor") || user.step === "idle")) {
+    user.doctor = matchedDoc;
+    user.step = "ask_name";
+    return {
+      type: "none",
+      reply: `${matchedDoc.name} (${matchedDoc.timing}, Fees ${matchedDoc.fees}) select ho gaye hain. 👨‍⚕️\n\nApna poora naam bata dein?`
+    };
+  }
+
+  if (["hi", "hii", "hiii", "hello", "hey", "salam", "assalam", "assalam-o-alaikum"].includes(low)) {
+    user.step = "idle";
+    return {
+      type: "none",
+      reply: `Wa Alaikum Assalam! 😊 Main Clinic Assistant hoon.\n\n${doctorsListText()}\nAppointment book karni ho to apna naam ya doctor ka naam bata dein.`
     };
   }
 
@@ -326,11 +371,22 @@ function handleInstantBackup(user, text) {
   }
 
   if (user.step === "ask_problem") {
+    if (
+      low.includes("kuch nahi") || low.includes("kuch nahn") || low.includes("kuch na") ||
+      low.includes("koi takleef nahi") || low.includes("koi masla nahi") || low.includes("check nahi") || low.includes("check nahn")
+    ) {
+      user.step = "idle";
+      return {
+        type: "none",
+        reply: "Acha ji! Agar checkup nahi karwana to abhi appointment book karne ki zaroorat nahi. 😊\nJab zaroorat ho ya kisi doctor/timing ke baray me poochhna ho to zaroor batayein."
+      };
+    }
     user.problem = text;
-    user.step = "ask_name";
+    user.step = "idle";
     return { type: "book", reply: "" };
   }
 
+  user.step = "ask_name";
   return {
     type: "none",
     reply: `Assalam-o-Alaikum! Main Clinic Assistant hoon. 😊\n\n${doctorsListText()}\nAppointment book karne ke liye apna naam bata dein?`
@@ -355,7 +411,7 @@ module.exports = async (req, res) => {
       const text = msg.text?.body || "";
 
       if (!users[from]) {
-        users[from] = { step: "ask_name", name: "", day: "", time: "", problem: "", doctor: null, lastBooked: null, history: [] };
+        users[from] = { step: "idle", name: "", day: "", time: "", problem: "", doctor: null, lastBooked: null, history: [] };
       }
 
       const user = users[from];
@@ -365,7 +421,7 @@ module.exports = async (req, res) => {
       const ai = await runAgent(user, text);
 
       let reply = "";
-      let doctorMsg = "";
+      let staffAlert = "";
 
       if (!ai) {
         const backup = handleInstantBackup(user, text);
@@ -374,13 +430,16 @@ module.exports = async (req, res) => {
           const doc = user.doctor || DOCTORS[0];
           user.lastBooked = { name: user.name || from, day: user.day || "Aaj", time: user.time || "6 baje", problem: user.problem || "Checkup", doctor: doc };
           reply = `✅ *Appointment Book Ho Gayi!*\n\n👤 *Naam:* ${user.lastBooked.name}\n📅 *Date:* ${user.lastBooked.day}\n⏰ *Time:* ${user.lastBooked.time}\n🤒 *Takleef:* ${user.lastBooked.problem}\n👨‍⚕️ *Doctor:* ${doc.name}\n💰 *Fees:* ${doc.fees}\n\nShukriya! Allah Shifa de. 🤲`;
-          doctorMsg = `🔔 *NAYI APPOINTMENT!* 🔔\n\n👤 *Patient:* ${user.lastBooked.name}\n📱 *Number:* ${from}\n📅 *Date:* ${user.lastBooked.day}\n⏰ *Time:* ${user.lastBooked.time}\n🤒 *Takleef:* ${user.lastBooked.problem}\n👨‍⚕️ *Doctor:* ${doc.name}`;
+          staffAlert = `🔔 *NAYI APPOINTMENT!* 🔔\n\n👤 *Patient:* ${user.lastBooked.name}\n📱 *Number:* ${from}\n📅 *Date:* ${user.lastBooked.day}\n⏰ *Time:* ${user.lastBooked.time}\n🤒 *Takleef:* ${user.lastBooked.problem}\n👨‍⚕️ *Doctor:* ${doc.name}`;
           await saveToSheet(user.lastBooked, from);
-          user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null;
+          user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null; user.step = "idle";
         } else if (backup.type === "cancel") {
-          if (user.lastBooked) await saveToSheet(user.lastBooked, from, true);
+          if (user.lastBooked) {
+            await saveToSheet(user.lastBooked, from, true);
+            staffAlert = `⚠️ *APPOINTMENT CANCELLED* ⚠️\n\n👤 *Patient:* ${user.lastBooked.name}\n📱 *Number:* ${from}\n📅 *Date:* ${user.lastBooked.day}\n⏰ *Time:* ${user.lastBooked.time}\n👨‍⚕️ *Doctor:* ${user.lastBooked.doctor?.name || "Dr. Usman Iqbal"}`;
+          }
           reply = backup.reply;
-          user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null;
+          user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null; user.step = "idle";
         } else {
           reply = backup.reply;
         }
@@ -400,21 +459,24 @@ module.exports = async (req, res) => {
           const doc = user.doctor || DOCTORS[0];
           user.lastBooked = { name: user.name, day: user.day, time: user.time, problem: user.problem, doctor: doc };
           reply = `✅ *Appointment Book Ho Gayi!*\n\n👤 *Naam:* ${user.name}\n📅 *Date:* ${user.day}\n⏰ *Time:* ${user.time}\n🤒 *Takleef:* ${user.problem}\n👨‍⚕️ *Doctor:* ${doc.name}\n💰 *Fees:* ${doc.fees}\n\nShukriya! Allah Shifa de. 🤲\nCancel karni ho to 'Cancel' likh dein.`;
-          doctorMsg = `🔔 *NAYI APPOINTMENT!* 🔔\n\n👤 *Patient:* ${user.name}\n📱 *Number:* ${from}\n📅 *Date:* ${user.day}\n⏰ *Time:* ${user.time}\n🤒 *Takleef:* ${user.problem}\n👨‍⚕️ *Doctor:* ${doc.name}`;
+          staffAlert = `🔔 *NAYI APPOINTMENT!* 🔔\n\n👤 *Patient:* ${user.name}\n📱 *Number:* ${from}\n📅 *Date:* ${user.day}\n⏰ *Time:* ${user.time}\n🤒 *Takleef:* ${user.problem}\n👨‍⚕️ *Doctor:* ${doc.name}`;
           await saveToSheet(user.lastBooked, from);
-          user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null;
+          user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null; user.step = "idle";
         }
 
         if (ai.action === "cancel") {
-          if (user.lastBooked) await saveToSheet(user.lastBooked, from, true);
+          if (user.lastBooked) {
+            await saveToSheet(user.lastBooked, from, true);
+            staffAlert = `⚠️ *APPOINTMENT CANCELLED* ⚠️\n\n👤 *Patient:* ${user.lastBooked.name}\n📱 *Number:* ${from}\n📅 *Date:* ${user.lastBooked.day}\n⏰ *Time:* ${user.lastBooked.time}\n👨‍⚕️ *Doctor:* ${user.lastBooked.doctor?.name || "Dr. Usman Iqbal"}`;
+          }
           reply = "Theek hai, aapki Appointment *CANCELLED* kar di hai. ❌\nSheet me bhi CANCELLED update kar diya hai. Dobara zaroorat ho to bata dein. 😊";
-          user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null;
+          user.name = ""; user.day = ""; user.time = ""; user.problem = ""; user.doctor = null; user.step = "idle";
         }
       }
 
       user.history.push(`Agent: ${reply}`);
       await sendWhatsApp(from, reply);
-      if (doctorMsg !== "") await sendWhatsApp(DOCTOR_NUMBER, doctorMsg);
+      if (staffAlert !== "") await notifyStaff(staffAlert);
 
       return res.status(200).send("OK");
     } catch (e) {
